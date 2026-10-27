@@ -8,7 +8,7 @@
 ![License](https://img.shields.io/badge/License-MIT%2FAcademic-purple)
 ![BPM Research Lab](https://img.shields.io/badge/Research-BPM%20Research%20Lab%20%7C%20UFRGS-003366)
 
-**An Open-Source, Decoupled Decision-Support Architecture for Systematic Literature Reviews (SLRs), High-Throughput Scientometrics, and Editorial Governance.**
+**A Unified Open-Source Platform for Scientometric Decision Support, Thematic Evolution, Editorial Governance, and Systematic Screening**
 
 Developed at the **BPM Research Lab — Institute of Informatics, Federal University of Rio Grande do Sul (UFRGS)**.
 
@@ -42,7 +42,7 @@ Developed at the **BPM Research Lab — Institute of Informatics, Federal Univer
 
 The **UniDS Platform** (*Unified Decision Support Platform*) is an enterprise-grade scientometric and evidence-synthesis environment engineered to bridge the gap between academic literature reviews and continuous journal governance. 
 
-Originating from research initiated at the **BPM Research Lab (UFRGS)** by **Leticia Naomi Asano** and **Prof. Dr. Lucineia Heloisa Thom**, the platform has evolved from an initial prototype into a decoupled, highly extensible modular decision-support system. It addresses two interdependent workflows:
+Originating from research initiated at the **BPM Research Lab (UFRGS)** by **Leticia Naomi Asano** and **Prof. Dr. Lucineia Heloisa Thom**, the platform has evolved from an initial prototype into a decoupled, highly extensible modular decision-support system, with additions by **Pedro Vitor Alexandre** and **Márcio Dorn**. It addresses two interdependent workflows:
 1. **For Researchers:** An end-to-end systematic literature review (SLR) pipeline featuring automated ingestion, multi-API metadata enrichment, fuzzy deduplication, an interactive **PRISMA 2020 state machine**, dual-model thematic clustering, and longitudinal flow modeling.
 2. **For Journal Editorial Boards:** Real-time editorial governance diagnostics, including sub-second **institutional endogeneity audits ($E_{\text{inst}}$)** for indexing compliance (e.g., SciELO, Scopus), transnational co-authorship tracking, citation inequality evaluations (Gini coefficient), and intelligent reviewer matching.
 
@@ -249,12 +249,8 @@ To enable automated GenAI topic labeling in `features/thematic_stratification.py
 If you utilize this platform, its algorithms, or generated visualizations in your published research, please cite:
 
 ```bibtex
-@article{unids_platform_2026,
-  author    = {Asano, Leticia Naomi and Thom, Lucineia Heloisa},
-  title     = {UniDS Platform: A Decoupled Decision-Support Architecture for Systematic Literature Reviews and Scientometric Editorial Governance},
-  journal   = {IEEE Access},
-  year      = {2026},
-  note      = {BPM Research Lab, Institute of Informatics, Federal University of Rio Grande do Sul (UFRGS)}
+@article{unids_2026,
+  XXX
 }
 ```
 
@@ -266,7 +262,7 @@ If you utilize this platform, its algorithms, or generated visualizations in you
 
 A **UniDS Platform** (*Unified Decision Support Platform*) é uma plataforma científica de apoio à decisão para revisões sistemáticas da literatura (RSL) e governança editorial de periódicos acadêmicos.
 
-Desenvolvida no âmbito do **BPM Research Lab** do Instituto de Informática da **Universidade Federal do Rio Grande do Sul (UFRGS)**, a ferramenta originou-se das pesquisas de **Leticia Naomi Asano** sob orientação da **Profa. Dra. Lucineia Heloisa Thom**, evoluindo de um protótipo inicial para uma arquitetura modular corporativa desacoplada.
+Desenvolvida no âmbito do **BPM Research Lab** do Instituto de Informática da **Universidade Federal do Rio Grande do Sul (UFRGS)**, a ferramenta originou-se das pesquisas de **Leticia Naomi Asano** sob orientação da **Profa. Dra. Lucineia Heloisa Thom**, evoluindo de um protótipo inicial para uma arquitetura modular corporativa desacoplada, com as adições de **Pedro Vitor Alexandre** e **Márcio Dorn**.
 
 A plataforma atende a dois perfis principais:
 1. **Pesquisadores:** Condução completa de revisões sistemáticas da literatura com suporte ao padrão **PRISMA 2020**, enriquecimento via múltiplas APIs (OpenAlex, Crossref, PubMed, Semantic Scholar), desduplicação fuzzy e modelagem de tópicos neurais e probabilísticos.
