@@ -1,0 +1,931 @@
+import streamlit as st
+import pandas as pd
+import numpy as np
+import plotly.express as px
+import plotly.graph_objects as go
+import networkx as nx
+import re
+import functools
+from utils.exports import _download_button
+
+# Comprehensive dictionary for country extraction
+# Mapping full country names, variants, and common academic names to standard names.
+COUNTRY_FULL_NAMES = {
+    # Americas
+    "usa": "United States", "u.s.a.": "United States", "u.s.a": "United States", 
+    "united states": "United States", "united states of america": "United States",
+    "brazil": "Brazil", "brasil": "Brazil",
+    "canada": "Canada",
+    "mexico": "Mexico", "méxico": "Mexico",
+    "argentina": "Argentina",
+    "chile": "Chile",
+    "colombia": "Colombia",
+    "peru": "Peru", "perú": "Peru",
+    "uruguay": "Uruguay",
+    "venezuela": "Venezuela",
+    "cuba": "Cuba",
+    "ecuador": "Ecuador",
+    "costa rica": "Costa Rica",
+    "panama": "Panama", "panamá": "Panama",
+    
+    # Europe
+    "uk": "United Kingdom", "u.k.": "United Kingdom", "united kingdom": "United Kingdom",
+    "england": "United Kingdom", "scotland": "United Kingdom", "wales": "United Kingdom", "northern ireland": "United Kingdom",
+    "germany": "Germany", "deutschland": "Germany",
+    "france": "France",
+    "spain": "Spain", "espana": "Spain", "españa": "Spain",
+    "italy": "Italy", "italia": "Italy",
+    "portugal": "Portugal",
+    "netherlands": "Netherlands", "holland": "Netherlands", "the netherlands": "Netherlands",
+    "sweden": "Sweden",
+    "switzerland": "Switzerland", "suisse": "Switzerland", "schweiz": "Switzerland",
+    "norway": "Norway",
+    "denmark": "Denmark",
+    "finland": "Finland",
+    "belgium": "Belgium",
+    "austria": "Austria", "österreich": "Austria",
+    "poland": "Poland", "polska": "Poland",
+    "greece": "Greece",
+    "ireland": "Ireland",
+    "czech republic": "Czech Republic", "czechia": "Czech Republic",
+    "hungary": "Hungary",
+    "romania": "Romania",
+    "croatia": "Croatia",
+    "slovakia": "Slovakia",
+    "slovenia": "Slovenia",
+    "bulgaria": "Bulgaria",
+    "serbia": "Serbia",
+    "ukraine": "Ukraine",
+    "russia": "Russia", "russian federation": "Russia",
+    "turkey": "Turkey", "turkiye": "Turkey", "türkiye": "Turkey",
+    "cyprus": "Cyprus",
+    "estonia": "Estonia",
+    "latvia": "Latvia",
+    "lithuania": "Lithuania",
+    "luxembourg": "Luxembourg",
+    "iceland": "Iceland",
+
+    # Asia & Middle East
+    "china": "China", "prc": "China", "peoples republic of china": "China", "people's republic of china": "China",
+    "india": "India",
+    "japan": "Japan", "nippon": "Japan",
+    "south korea": "South Korea", "korea": "South Korea", "republic of korea": "South Korea",
+    "taiwan": "Taiwan",
+    "singapore": "Singapore",
+    "malaysia": "Malaysia",
+    "thailand": "Thailand",
+    "vietnam": "Vietnam",
+    "indonesia": "Indonesia",
+    "philippines": "Philippines",
+    "pakistan": "Pakistan",
+    "bangladesh": "Bangladesh",
+    "sri lanka": "Sri Lanka",
+    "iran": "Iran",
+    "israel": "Israel",
+    "saudi arabia": "Saudi Arabia",
+    "united arab emirates": "United Arab Emirates", "uae": "United Arab Emirates", "u.a.e.": "United Arab Emirates",
+    "qatar": "Qatar",
+    "kuwait": "Kuwait",
+    "jordan": "Jordan",
+    "lebanon": "Lebanon",
+    "kazakhstan": "Kazakhstan",
+
+    # Oceania
+    "australia": "Australia",
+    "new zealand": "New Zealand",
+
+    # Africa
+    "south africa": "South Africa",
+    "egypt": "Egypt",
+    "nigeria": "Nigeria",
+    "kenya": "Kenya",
+    "morocco": "Morocco",
+    "tunisia": "Tunisia",
+    "algeria": "Algeria",
+    "ghana": "Ghana",
+    "ethiopia": "Ethiopia"
+}
+
+# Ambiguous 2-letter ISO codes that collide with common prepositions/words (e.g. 'de', 'in', 'it', 'no', 'es', 'at', 'is', 'be', 'to')
+# are removed so prepositions in affiliations (e.g., 'Universidade de ...') are never falsely identified as countries.
+ISO2_CODES = {
+    "br": "Brazil", "bra": "Brazil",
+    "usa": "United States",
+    "gbr": "United Kingdom",
+    "prt": "Portugal",
+    "esp": "Spain",
+    "fra": "France",
+    "deu": "Germany",
+    "ita": "Italy",
+    "can": "Canada",
+    "aus": "Australia",
+    "chn": "China",
+    "ind": "India",
+    "jpn": "Japan",
+    "kor": "South Korea",
+    "nld": "Netherlands",
+    "che": "Switzerland",
+    "swe": "Sweden",
+    "nor": "Norway",
+    "dnk": "Denmark",
+    "fin": "Finland",
+    "pol": "Poland",
+    "aut": "Austria",
+    "bel": "Belgium",
+    "rus": "Russia",
+    "mex": "Mexico",
+    "arg": "Argentina",
+    "chl": "Chile",
+    "col": "Colombia"
+}
+
+# Regional cities, states, and prominent universities heuristics to detect countries when country name is omitted
+CITY_STATE_FALLBACKS = [
+    # Prominent Global Universities & Institutions
+    (r'\b(mit|harvard|stanford|ucla|uc berkeley|carnegie mellon|caltech|columbia university|yale|princeton)\b', 'United States'),
+    (r'\b(oxford|cambridge|imperial college|ucl|edinburgh)\b', 'United Kingdom'),
+    (r'\b(usp|unicamp|unesp|ufrj|ufmg|ufrgs|ufsc|ufpr|ufpe|unb|ufba|ufc|ufscar|unifesp|puc-sp|puc-rio|pucrs|puc-pr|pucpr|pontifícia universidade católica|pontificia universidade catolica|fiocruz|inpe|embrapa|universidade federal|instituto federal|universidade estadual|univ federal|unifesp|utfpr|ufop|ufpel|ufg|ufms|ufmt|ufrpe|ufpb|ufma|ufpa|ufam|ufrr|unifal|unifei|ufs|ufv|ufvjm|ufrn|uema|uece|uerj|uel|uem|uemg)\b', 'Brazil'),
+    
+    # United States States & Major Metros
+    (r'\b(california|new york|texas|massachusetts|illinois|washington|florida|pennsylvania|ohio|michigan|georgia|north carolina|virginia|colorado|maryland|arizona)\b', 'United States'),
+    (r'\b(boston|berkeley|chicago|seattle|austin|pittsburgh|baltimore|atlanta|los angeles|san francisco)\b', 'United States'),
+    # Require 5-digit US zip code when matching two-letter state abbreviations so 'ca' (Canada) is never falsely matched as California
+    (r',?\s*\b(ma|ca|ny|tx|wa|il|fl|pa|nc|va)\s+[0-9]{5}\b', 'United States'),
+    
+    # Brazil States & Major Metros
+    (r'\b(são paulo|sao paulo|rio de janeiro|belo horizonte|porto alegre|curitiba|recife|salvador|brasília|brasilia|fortaleza|campinas|florianópolis|florianopolis|vitória|vitoria|natal|joão pessoa|joao pessoa|manaus|belém|belem|ouro preto|pelotas|jataí|jatai|viçosa|vicosa|uberlândia|uberlandia|juiz de fora|maringá|maringa|londrina|campina grande|santa maria|ribeirão preto|ribeirao preto|são carlos|sao carlos)\b', 'Brazil'),
+    (r',?\s*\b(ce|rs|sp|rj|mg|pr|sc|ba|pe|df|go|pa|rn|pb|es|ma|al|pi|mt|ms|se|ro|to|ac|ap|rr)\b\s*(?:,\s*brasil|,\s*brazil|[0-9]{5}-?[0-9]{3}|$)', 'Brazil'),
+    
+    # Canada Institutions & Locations
+    (r'\b(école de technologie supérieure|ecole de technologie superieure|ets montreal|quebec|québec|montreal|montréal|toronto|vancouver|ottawa|waterloo)\b', 'Canada'),
+
+    # United Kingdom
+    (r'\b(london|edinburgh|manchester|birmingham|bristol|glasgow|leeds|sheffield)\b', 'United Kingdom'),
+    # Others
+    (r'\b(paris|lyon|marseille|toulouse)\b', 'France'),
+    (r'\b(berlin|munich|münchen|heidelberg|frankfurt|hamburg|stuttgart)\b', 'Germany'),
+    (r'\b(madrid|barcelona|valencia|seville|granada)\b', 'Spain'),
+    (r'\b(rome|milan|bologna|florence|turin|padua)\b', 'Italy'),
+    (r'\b(lisboa|lisbon|porto|coimbra|braga)\b', 'Portugal'),
+    (r'\b(sydney|melbourne|brisbane|canberra|adelaide|perth)\b', 'Australia'),
+    (r'\b(beijing|shanghai|tsinghua|peking|shenzhen|hangzhou|wuhan)\b', 'China'),
+    (r'\b(tokyo|kyoto|osaka|tohoku|nagoya)\b', 'Japan'),
+    (r'\b(seoul|kaist|yonsei|korea university)\b', 'South Korea'),
+    (r'\b(amsterdam|rotterdam|utrecht|leiden|delft|eindhoven)\b', 'Netherlands'),
+    (r'\b(zurich|zürich|geneva|lausanne|basel|eth zurich|epfl)\b', 'Switzerland')
+]
+
+# Standard ISO-2 and ISO-3 codes for explicit country code parsing (like 'ES; MX; US' or 'BR; CA')
+ALL_ISO_CODES = {
+    "br": "Brazil", "bra": "Brazil",
+    "us": "United States", "usa": "United States",
+    "ca": "Canada", "can": "Canada",
+    "es": "Spain", "esp": "Spain",
+    "mx": "Mexico", "mex": "Mexico",
+    "ec": "Ecuador", "ecu": "Ecuador",
+    "ar": "Argentina", "arg": "Argentina",
+    "cl": "Chile", "chl": "Chile",
+    "co": "Colombia", "col": "Colombia",
+    "pe": "Peru", "per": "Peru",
+    "uy": "Uruguay", "ury": "Uruguay",
+    "ve": "Venezuela", "ven": "Venezuela",
+    "gb": "United Kingdom", "gbr": "United Kingdom", "uk": "United Kingdom",
+    "pt": "Portugal", "prt": "Portugal",
+    "fr": "France", "fra": "France",
+    "de": "Germany", "deu": "Germany",
+    "it": "Italy", "ita": "Italy",
+    "au": "Australia", "aus": "Australia",
+    "cn": "China", "chn": "China",
+    "in": "India", "ind": "India",
+    "jp": "Japan", "jpn": "Japan",
+    "kr": "South Korea", "kor": "South Korea",
+    "nl": "Netherlands", "nld": "Netherlands",
+    "ch": "Switzerland", "che": "Switzerland",
+    "se": "Sweden", "swe": "Sweden",
+    "no": "Norway", "nor": "Norway",
+    "dk": "Denmark", "dnk": "Denmark",
+    "fi": "Finland", "fin": "Finland",
+    "pl": "Poland", "pol": "Poland",
+    "at": "Austria", "aut": "Austria",
+    "be": "Belgium", "bel": "Belgium",
+    "ru": "Russia", "rus": "Russia",
+    "ie": "Ireland", "irl": "Ireland",
+    "nz": "New Zealand", "nzl": "New Zealand",
+    "sg": "Singapore", "sgp": "Singapore",
+    "za": "South Africa", "zaf": "South Africa"
+}
+
+COUNTRY_MAPPING = COUNTRY_FULL_NAMES
+
+# Pre-compile country matching regex patterns once
+_SORTED_COUNTRY_KEYS = sorted(COUNTRY_FULL_NAMES.keys(), key=len, reverse=True)
+COUNTRY_PATTERN = re.compile(r'\b(' + '|'.join(re.escape(k) for k in _SORTED_COUNTRY_KEYS) + r')\b')
+CITY_STATE_FALLBACKS_COMPILED = [(re.compile(pat, re.IGNORECASE), cname) for pat, cname in CITY_STATE_FALLBACKS]
+ISO2_COMPILED = [(re.compile(r'(?:^|[\s,;.-])' + re.escape(code) + r'(?:$|[\s,;.-])'), cname) for code, cname in ISO2_CODES.items()]
+
+@functools.lru_cache(maxsize=16384)
+def _extract_single_country(segment_str: str) -> frozenset:
+    """Extract countries from an individual affiliation or country token/chunk."""
+    seg = segment_str.strip().lower()
+    if not seg:
+        return frozenset()
+        
+    found = set()
+    clean_exact = seg.strip(' ,;.-')
+    
+    # 1. Exact ISO code match for token (e.g. 'es', 'mx', 'us', 'br', 'ca')
+    if clean_exact in ALL_ISO_CODES:
+        return frozenset({ALL_ISO_CODES[clean_exact]})
+        
+    # 2. Check full country names via pre-compiled regex
+    for match in COUNTRY_PATTERN.finditer(seg):
+        matched_key = match.group(0)
+        if matched_key in COUNTRY_FULL_NAMES:
+            found.add(COUNTRY_FULL_NAMES[matched_key])
+            
+    # 3. Check city, state, and academic institution fallbacks
+    if not found:
+        for pat, cname in CITY_STATE_FALLBACKS_COMPILED:
+            if pat.search(seg):
+                found.add(cname)
+                break
+                
+    # 4. Strict 2/3-letter ISO match delimited at boundaries
+    if not found:
+        for pat, cname in ISO2_COMPILED:
+            if pat.search(seg):
+                found.add(cname)
+                break
+                
+    return frozenset(found)
+
+@functools.lru_cache(maxsize=16384)
+def _extract_countries_cached(affiliation_str: str) -> tuple:
+    if not affiliation_str or pd.isna(affiliation_str):
+        return ()
+    aff_str = str(affiliation_str).strip()
+    if not aff_str:
+        return ()
+
+    # If multiple values are delimited by semicolon, split and evaluate each segment
+    if ';' in aff_str:
+        segments = [s.strip() for s in aff_str.split(';') if s.strip()]
+        found_countries = set()
+        for seg in segments:
+            found_countries.update(_extract_single_country(seg))
+        return tuple(sorted(found_countries))
+
+    return tuple(sorted(_extract_single_country(aff_str)))
+
+def extract_countries(affiliation_str) -> list:
+    if pd.isna(affiliation_str) or not str(affiliation_str).strip():
+        return []
+    return list(_extract_countries_cached(str(affiliation_str).strip()))
+
+def save_geographic_inference_log(df: pd.DataFrame, project_name: str = None) -> str:
+    """
+    Generates and saves a detailed audit log of geographic metadata provenance
+    and regex/gazetteer country deduction heuristics to Projects/<project_name>/logs/.
+    Saves both geographic_inference_audit.log (human-readable) and geographic_inference_audit.json.
+    Returns the formatted text log.
+    """
+    if df is None or df.empty or 'Country_Extracted' not in df.columns:
+        return ""
+        
+    from utils.project_manager import get_active_project_name, save_project_file
+    import datetime, json
+    from collections import Counter
+    
+    target_proj = project_name or get_active_project_name()
+    total_raw = len(df)
+    now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    
+    has_aff = df['Affiliations'].apply(lambda x: pd.notna(x) and str(x).strip() != '' and str(x).lower() != 'nan').sum() if 'Affiliations' in df.columns else 0
+    has_addr = df['Address'].apply(lambda x: pd.notna(x) and str(x).strip() != '' and str(x).lower() != 'nan').sum() if 'Address' in df.columns else 0
+    has_orig = df['Country'].apply(lambda x: pd.notna(x) and str(x).strip() != '' and str(x).lower() != 'nan') if 'Country' in df.columns else pd.Series(False, index=df.index)
+    orig_count = int(has_orig.sum())
+    
+    has_extracted = df['Has_Country'] if 'Has_Country' in df.columns else df['Country_Extracted'].apply(lambda x: len(x) > 0)
+    identified_count = int(has_extracted.sum())
+    missing_count = total_raw - identified_count
+    
+    # Identify records whose country was deduced strictly via regex/gazetteer heuristics
+    deduced_mask = (~has_orig) & has_extracted
+    deduced_count = int(deduced_mask.sum())
+    
+    deduced_df = df[deduced_mask]
+    deduced_countries_flat = [c for sub in deduced_df['Country_Extracted'] for c in sub]
+    country_freq = Counter(deduced_countries_flat).most_common()
+    
+    # Build detailed deduction record list
+    deduced_records = []
+    for idx, r in deduced_df.iterrows():
+        deduced_records.append({
+            "index": int(idx) if str(idx).isdigit() else str(idx),
+            "title": str(r.get('Title', 'Untitled')),
+            "affiliations": str(r.get('Affiliations', '')) if pd.notna(r.get('Affiliations')) else "",
+            "address": str(r.get('Address', '')) if pd.notna(r.get('Address')) else "",
+            "deduced_countries": list(r.get('Country_Extracted', []))
+        })
+        
+    orig_pct = (orig_count / total_raw * 100) if total_raw else 0
+    deduced_pct = (deduced_count / total_raw * 100) if total_raw else 0
+    ident_pct = (identified_count / total_raw * 100) if total_raw else 0
+    missing_pct = (missing_count / total_raw * 100) if total_raw else 0
+    aff_pct = (has_aff / total_raw * 100) if total_raw else 0
+    addr_pct = (has_addr / total_raw * 100) if total_raw else 0
+    
+    # 1. Plain Text Human-Readable Log Report
+    lines = [
+        "=" * 80,
+        "GEOGRAPHIC PROVENANCE & DEMOGRAPHIC INFERENCE AUDIT LOG",
+        "=" * 80,
+        f"Project Name:                   {target_proj}",
+        f"Generated At:                   {now_str}",
+        f"Methodology:                    Rule-based gazetteer & administrative subdivision regex heuristics",
+        "",
+        "-" * 80,
+        "1. CORPUS SUMMARY & QUALITY AUDIT METRICS",
+        "-" * 80,
+        f"Total Publications in Corpus:          {total_raw:>6,} (100.0%)",
+        f"Affiliations Metadata Present:         {has_aff:>6,} ({aff_pct:.1f}%)",
+        f"Author Address Metadata Present:       {has_addr:>6,} ({addr_pct:.1f}%)",
+        f"Explicit Country Present in Raw Data:  {orig_count:>6,} ({orig_pct:.1f}%)",
+        f"Country Recovered by Regex Heuristics: {deduced_count:>6,} ({deduced_pct:.1f}%)",
+        "-" * 80,
+        f"Total Geographic Provenance Identified: {identified_count:>6,} ({ident_pct:.1f}%)",
+        f"Unresolved Records (Missing Country):   {missing_count:>6,} ({missing_pct:.1f}%)",
+        "-" * 80,
+        "",
+        "2. BREAKDOWN OF RECOVERED COUNTRIES VIA HEURISTICS",
+        "-" * 80
+    ]
+    if country_freq:
+        for cname, cnt in country_freq:
+            lines.append(f"  - {cname:<30}: {cnt:>4} records")
+    else:
+        lines.append("  (No records required heuristic country deduction)")
+        
+    lines.extend([
+        "",
+        "-" * 80,
+        f"3. DEDUCTION PROVENANCE RECORDS ({deduced_count} publications recovered from Affiliations/Address)",
+        "-" * 80
+    ])
+    
+    for item in deduced_records:
+        countries_str = ", ".join(item['deduced_countries'])
+        aff_display = item['affiliations'][:90] + ("..." if len(item['affiliations']) > 90 else "")
+        addr_display = item['address'][:90] + ("..." if len(item['address']) > 90 else "")
+        lines.append(f"[Record #{item['index']}]")
+        lines.append(f"  Title:    {item['title']}")
+        if aff_display:
+            lines.append(f"  Affil:    {aff_display}")
+        if addr_display:
+            lines.append(f"  Address:  {addr_display}")
+        lines.append(f"  Deduced:  {countries_str}")
+        lines.append("")
+        
+    lines.append("=" * 80)
+    log_text = "\n".join(lines)
+    
+    # 2. Structured JSON payload for automated parsing / replication
+    json_payload = {
+        "project_name": target_proj,
+        "generated_at": now_str,
+        "total_records": total_raw,
+        "affiliations_present": int(has_aff),
+        "affiliations_pct": round(aff_pct, 2),
+        "address_present": int(has_addr),
+        "address_pct": round(addr_pct, 2),
+        "explicit_country_count": orig_count,
+        "explicit_country_pct": round(orig_pct, 2),
+        "heuristic_deduced_count": deduced_count,
+        "heuristic_deduced_pct": round(deduced_pct, 2),
+        "total_identified_count": identified_count,
+        "total_identified_pct": round(ident_pct, 2),
+        "missing_country_count": missing_count,
+        "missing_country_pct": round(missing_pct, 2),
+        "recovered_countries_breakdown": dict(country_freq),
+        "deduced_records": deduced_records
+    }
+    
+    try:
+        save_project_file("logs", "geographic_inference_audit.log", log_text, mode="w", project_name=target_proj)
+        save_project_file("logs", "geographic_inference_audit.json", json.dumps(json_payload, indent=2, ensure_ascii=False), mode="w", project_name=target_proj)
+        return log_text
+    except Exception as e:
+        print(f"Error saving geographic audit log: {e}")
+        return log_text
+
+def show(df):
+    st.markdown("<h2 style='font-size: 24px; font-weight: 700; color: #1E293B;'><i class='bi bi-globe-americas' style='color: #697aa2;'></i> Global Demographics & Governance</h2>", unsafe_allow_html=True)
+    
+    if df is None or df.empty:
+        st.warning("No data available.")
+        return
+
+    has_gender = 'gender_analysis_results' in st.session_state
+    gender_res = st.session_state.get('gender_analysis_results', {})
+    authors_df = gender_res.get('authors_df', pd.DataFrame()) if has_gender else pd.DataFrame()
+
+    geo_cols = [c for c in ['Affiliations', 'Address', 'Country'] if c in df.columns]
+    if not geo_cols and authors_df.empty:
+        st.error("The dataset does not have an 'Affiliations', 'Address', or 'Country' column required for demographic and geographic analysis.")
+        return
+
+    total_raw = len(df)
+    
+    # --- Data Cleaning and Extraction ---
+    with st.spinner("Extracting geographic metadata from affiliations and author addresses..."):
+        def extract_all_countries(row):
+            found = set()
+            # Strictly use author-bound fields: Affiliations, Address, and Country.
+            # Conference 'Location' is excluded to avoid mistaking the event hosting venue for the author's origin.
+            for col in ['Affiliations', 'Address', 'Country']:
+                if col in row and pd.notna(row[col]):
+                    found.update(extract_countries(row[col]))
+            return list(found)
+        df['Country_Extracted'] = df.apply(extract_all_countries, axis=1)
+            
+    # Calculate Data Quality Metrics
+    df['Has_Country'] = df['Country_Extracted'].apply(lambda x: len(x) > 0)
+    missing_count = total_raw - df['Has_Country'].sum()
+    missing_pct = (missing_count / total_raw) * 100 if total_raw > 0 else 0
+
+    if missing_count > 0:
+        st.info(f"**Data Quality Notice:** **{missing_count}** out of {total_raw} articles (**{missing_pct:.1f}%**) do not have identifiable country data in their affiliations. Unlocked author-level inferences are also available below.")
+    else:
+        st.success(f"**Data Quality Notice:** All {total_raw} articles have identifiable country data.")
+
+    # Automatically save geographic deduction audit log to project logs folder
+    save_geographic_inference_log(df)
+
+    df_valid = df[df['Has_Country']].copy()
+    
+    # Create Tabs for the unified module
+    tab_geo, tab_network, tab_endo, tab_audit = st.tabs([
+        "Geographic Distribution & Gender", 
+        "Transnational Network", 
+        "Editorial Endogeneity",
+        "Geographic Metadata Audit"
+    ])
+    
+    with tab_geo:
+        st.markdown("""
+        **Spatial Autocorrelation & Capillarity**
+        Visualizing the global reach of publications and gender distribution across countries using choropleth heat maps.
+        """)
+        
+        has_gender_data = has_gender and not authors_df.empty
+        
+        # Gender & Author filter for Geographic Map
+        geo_mode = st.radio(
+            "Spatial Map View:",
+            ["Article Origin Countries", "All Author Affiliations", "Female Authors by Country", "Male Authors by Country"],
+            index=0,
+            horizontal=True
+        )
+
+        if geo_mode in ["Female Authors by Country", "Male Authors by Country"]:
+            if not has_gender_data:
+                st.markdown("""
+                <div style="background-color: #F8FAFC; border: 2px dashed #CBD5E1; border-radius: 12px; padding: 32px 20px; text-align: center; margin: 16px 0;">
+                    <div style="font-size: 36px; margin-bottom: 8px;"><i class="bi bi-lock-fill" style="color: #64748B;"></i></div>
+                    <h4 style="font-size: 17px; font-weight: 700; color: #334155; margin-bottom: 6px;">
+                        Gender-Segmented Spatial View Locked
+                    </h4>
+                    <p style="font-size: 13px; color: #64748B; max-width: 560px; margin: 0 auto 16px auto; line-height: 1.5;">
+                        Visualizing female vs. male author distributions by country requires prior author name extraction and gender inference.
+                        Please run the <b>Gender Mapping</b> pipeline to unlock gender-based geographic distributions.
+                    </p>
+                </div>
+                """, unsafe_allow_html=True)
+                c_lock_l, c_lock_m, c_lock_r = st.columns([1, 1.2, 1])
+                with c_lock_m:
+                    if st.button("Run Gender Mapping to Unlock", icon=":material/arrow_forward:", type="primary", width="stretch", key="btn_unlock_gender_geo"):
+                        st.session_state.current_page = "Gender Mapping"
+                        st.rerun()
+            else:
+                target_g = "female" if "Female" in geo_mode else "male"
+                color_theme = "Sunsetdark" if target_g == "female" else "Bluyl"
+                filtered_authors = authors_df[authors_df['gender'] == target_g]
+                c_counts = filtered_authors[filtered_authors['country'] != 'Unknown']['country'].value_counts().reset_index()
+                c_counts.columns = ['Country', f'{target_g.title()} Authors']
+                
+                if not c_counts.empty:
+                    c_hdr, c_dl = st.columns([0.7, 0.3], vertical_alignment="center")
+                    with c_hdr:
+                        st.markdown(f"<div style='font-size:16px; font-weight:700; color:#1E293B;'>Global Distribution of {target_g.title()} Authors by Country</div>", unsafe_allow_html=True)
+                    with c_dl:
+                        _download_button(c_counts, "Download CSV", f"{target_g}_authors_by_country.csv", key=f"dl_demog_{target_g}_countries")
+
+                    fig_map = px.choropleth(
+                        c_counts,
+                        locations='Country',
+                        locationmode='country names',
+                        color=f'{target_g.title()} Authors',
+                        color_continuous_scale=color_theme,
+                        projection='equal earth'
+                    )
+                    fig_map.update_geos(showland=True, landcolor="#e2e8f0", showcountries=True, countrycolor="white")
+                    fig_map.update_layout(margin=dict(l=0, r=0, t=20, b=0), height=480)
+                    st.plotly_chart(fig_map, width='stretch')
+
+                    with st.expander(f"View Raw Country Data ({target_g.title()} Authors)", expanded=False):
+                        st.dataframe(c_counts, hide_index=True, width="stretch")
+                else:
+                    st.info(f"No country metadata identified for {target_g} authors yet.")
+        elif geo_mode == "All Author Affiliations":
+            if not has_gender_data:
+                st.markdown("""
+                <div style="background-color: #F8FAFC; border: 2px dashed #CBD5E1; border-radius: 12px; padding: 32px 20px; text-align: center; margin: 16px 0;">
+                    <div style="font-size: 36px; margin-bottom: 8px;"><i class="bi bi-lock-fill" style="color: #64748B;"></i></div>
+                    <h4 style="font-size: 17px; font-weight: 700; color: #334155; margin-bottom: 6px;">
+                        Inferred Author-Level Geographic View Locked
+                    </h4>
+                    <p style="font-size: 13px; color: #64748B; max-width: 560px; margin: 0 auto 16px auto; line-height: 1.5;">
+                        Visualizing individual author-level country affiliations requires prior author extraction.
+                        You can view article-level geographic distributions directly via <b>Article Origin Countries</b>, or run Gender Mapping to unlock author-level counts.
+                    </p>
+                </div>
+                """, unsafe_allow_html=True)
+                c_lock_l, c_lock_m, c_lock_r = st.columns([1, 1.2, 1])
+                with c_lock_m:
+                    if st.button("Run Gender Mapping to Unlock", icon=":material/arrow_forward:", type="primary", width="stretch", key="btn_unlock_author_geo"):
+                        st.session_state.current_page = "Gender Mapping"
+                        st.rerun()
+            else:
+                c_counts = authors_df[authors_df['country'] != 'Unknown']['country'].value_counts().reset_index()
+                c_counts.columns = ['Country', 'Total Inferred Authors']
+                if not c_counts.empty:
+                    c_hdr, c_dl = st.columns([0.7, 0.3], vertical_alignment="center")
+                    with c_hdr:
+                        st.markdown("<div style='font-size:16px; font-weight:700; color:#1E293B;'>Global Distribution of All Authors (Inferred)</div>", unsafe_allow_html=True)
+                    with c_dl:
+                        _download_button(c_counts, "Download CSV", "all_author_affiliations_countries.csv", key="dl_demog_author_countries")
+
+                    fig = px.choropleth(
+                        c_counts,
+                        locations="Country",
+                        locationmode="country names",
+                        color="Total Inferred Authors",
+                        hover_name="Country",
+                        projection='equal earth',
+                        color_continuous_scale='turbid'
+                    )
+                    fig.update_geos(showland=True, landcolor="#e2e8f0", showcountries=True, countrycolor="white")
+                    fig.update_layout(margin={"r":0,"t":20,"l":0,"b":0}, height=480)
+                    st.plotly_chart(fig, width='stretch')
+                    with st.expander("View Raw Country Data", expanded=False):
+                        st.dataframe(c_counts, hide_index=True, width="stretch")
+                else:
+                    st.info("No inferred author country data available.")
+        else:
+            if not df_valid.empty:
+                all_countries = [country for sublist in df_valid['Country_Extracted'] for country in sublist]
+                country_counts = pd.Series(all_countries).value_counts().reset_index()
+                country_counts.columns = ['Country', 'Article Count']
+                
+                c_hdr, c_dl = st.columns([0.7, 0.3], vertical_alignment="center")
+                with c_hdr:
+                    st.markdown("<div style='font-size:16px; font-weight:700; color:#1E293B;'>Global Distribution of Publications (Article Affiliations)</div>", unsafe_allow_html=True)
+                with c_dl:
+                    _download_button(country_counts, "Download CSV", "article_origin_countries.csv", key="dl_demog_article_countries")
+
+                fig = px.choropleth(
+                    country_counts, 
+                    locations="Country", 
+                    locationmode="country names",
+                    color="Article Count", 
+                    hover_name="Country",
+                    projection='equal earth',
+                    color_continuous_scale='turbid'
+                )
+                fig.update_geos(showland=True, landcolor="#e2e8f0", showcountries=True, countrycolor="white")
+                fig.update_layout(margin={"r":0,"t":20,"l":0,"b":0}, height=480)
+                st.plotly_chart(fig, width='stretch')
+                
+                with st.expander("View Raw Data", expanded=False):
+                    st.dataframe(country_counts, hide_index=True, width="stretch")
+            else:
+                st.warning("No geographic data available for mapping.")
+
+    with tab_network:
+        st.markdown("""
+        **Transnational Co-authorship Graph $G = (V, E)$**
+        The edge weight $w_{ij} = \\sum X_a(i, j)$ expresses the intensity of cooperation between country $i$ and country $j$.
+        """)
+        
+        if not df_valid.empty:
+            # Build edges
+            edges = {}
+            node_weights = {}
+            for countries in df_valid['Country_Extracted']:
+                countries = sorted(countries) # Sort to avoid (A,B) and (B,A) duplicates
+                for c in countries:
+                    node_weights[c] = node_weights.get(c, 0) + 1
+                    
+                if len(countries) > 1:
+                    for i in range(len(countries)):
+                        for j in range(i+1, len(countries)):
+                            pair = (countries[i], countries[j])
+                            edges[pair] = edges.get(pair, 0) + 1
+            
+            if not edges:
+                st.info("No international co-authorships found in this dataset.")
+            else:
+                # Options for filtering
+                st.markdown("<h4 style='font-size: 15px;'>Graph Filters</h4>", unsafe_allow_html=True)
+                
+                net_ctrl1, net_ctrl2 = st.columns([0.7, 0.3], vertical_alignment="bottom")
+                with net_ctrl1:
+                    filter_option = st.radio("Display Mode:", ["Show Top N Nodes", "Show All Nodes"], horizontal=True)
+                with net_ctrl2:
+                    edges_df = pd.DataFrame([
+                        {"Country A": pair[0], "Country B": pair[1], "Co-authorships": weight}
+                        for pair, weight in edges.items()
+                    ]).sort_values("Co-authorships", ascending=False)
+                    _download_button(edges_df, "Download Network CSV", "transnational_coauthorships.csv", key="dl_demog_network_edges")
+                
+                nodes_to_keep = set(node_weights.keys())
+                
+                if filter_option == "Show Top N Nodes":
+                    top_n = st.slider("Select N:", min_value=2, max_value=len(node_weights), value=min(20, len(node_weights)))
+                    # Sort nodes by weight descending
+                    sorted_nodes = sorted(node_weights.items(), key=lambda x: x[1], reverse=True)
+                    nodes_to_keep = {k for k, v in sorted_nodes[:top_n]}
+                    
+                # Filter edges based on nodes_to_keep
+                filtered_edges = {pair: weight for pair, weight in edges.items() if pair[0] in nodes_to_keep and pair[1] in nodes_to_keep}
+                
+                # Build NetworkX graph
+                G = nx.Graph()
+                for (u, v), w in filtered_edges.items():
+                    G.add_edge(u, v, weight=w)
+                
+                # Ensure all kept nodes are in graph even if no edges (isolated)
+                for n in nodes_to_keep:
+                    G.add_node(n, weight=node_weights.get(n, 1))
+                
+                if G.number_of_nodes() == 0:
+                    st.warning("No data matches the selected filter.")
+                else:
+                    pos = nx.spring_layout(G, k=0.5, seed=42)
+                    
+                    edge_x = []
+                    edge_y = []
+                    for edge in G.edges():
+                        x0, y0 = pos[edge[0]]
+                        x1, y1 = pos[edge[1]]
+                        edge_x.extend([x0, x1, None])
+                        edge_y.extend([y0, y1, None])
+                        
+                    edge_trace = go.Scatter(
+                        x=edge_x, y=edge_y,
+                        line=dict(width=1, color='#888'),
+                        hoverinfo='none',
+                        mode='lines')
+                        
+                    node_x = []
+                    node_y = []
+                    node_text = []
+                    node_size = []
+                    
+                    for node in G.nodes():
+                        x, y = pos[node]
+                        node_x.append(x)
+                        node_y.append(y)
+                        count = node_weights.get(node, 0)
+                        node_text.append(f"{node} (Articles: {count})")
+                        # Scale size non-linearly to avoid massive overlapping nodes
+                        node_size.append(10 + (count ** 0.5) * 2)
+                        
+                    node_trace = go.Scatter(
+                        x=node_x, y=node_y,
+                        mode='markers+text',
+                        hoverinfo='text',
+                        text=[n for n in G.nodes()],
+                        textposition="top center",
+                        hovertext=node_text,
+                        marker=dict(
+                            showscale=False,
+                            color='#697aa2',
+                            size=node_size,
+                            line_width=2))
+                            
+                    fig = go.Figure(data=[edge_trace, node_trace],
+                                 layout=go.Layout(
+                                    title=dict(text='Transnational Co-authorship Network', font=dict(size=16)),
+                                    showlegend=False,
+                                    hovermode='closest',
+                                    margin=dict(b=20,l=5,r=5,t=40),
+                                    xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
+                                    yaxis=dict(showgrid=False, zeroline=False, showticklabels=False))
+                                    )
+                    st.plotly_chart(fig, width='stretch')
+
+    with tab_endo:
+        st.markdown("""
+        The ethical governance and sustainability of a scientific journal require constant analytical monitoring of its academic independence. As discussed by experts, the main risk factor for a journal's isolation or de-indexing is **Editorial Endogeneity**, characterized by a disproportionate concentration of publications originating from authors linked to the journal's own publisher institution.
+
+        Strict guidelines established by indexers, such as *SciELO*, stipulate strict percentage limits for the acceptance of endogenous articles. To audit a journal's compliance with these rules, the **Institutional Endogeneity Index ($E_{inst}$)** is mathematically formalized as:
+        
+        $$ E_{inst} = \\frac{\\sum_{a=1}^{A} \\delta(I_a, I_{pub})}{A} $$
+        """)
+        st.divider()
+
+        st.markdown("<h3 style='font-size: 19px; font-weight: 700; color: #1E293B;'>Audit Configuration</h3>", unsafe_allow_html=True)
+        
+        # Check for missing affiliations specifically for Endogeneity (uses raw strings)
+        df_endo_missing = df[df['Affiliations'].isna() | (df['Affiliations'].astype(str).str.strip() == '') | (df['Affiliations'].astype(str).str.lower() == 'nan')]
+        endo_missing_count = len(df_endo_missing)
+        endo_missing_pct = (endo_missing_count / total_raw) * 100 if total_raw > 0 else 0
+        
+        if endo_missing_count > 0:
+            st.info(f"**Data Quality Notice:** **{endo_missing_count}** out of {total_raw} articles (**{endo_missing_pct:.1f}%**) do not have affiliation data. These have been filtered out for the endogeneity analysis.")
+        
+        df_endo_valid = df.drop(df_endo_missing.index).copy()
+        total_endo_analyzed = len(df_endo_valid)
+
+        if total_endo_analyzed == 0:
+            st.warning("No articles with affiliations available to analyze.")
+        else:
+            # Extract unique affiliations for the dropdown
+            all_affiliations = set()
+            for aff_str in df_endo_valid['Affiliations'].dropna():
+                for inst in str(aff_str).replace(',', ';').split(';'):
+                    cleaned = inst.strip()
+                    if cleaned:
+                        all_affiliations.add(cleaned)
+            unique_affiliations = sorted(list(all_affiliations))
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                selected_inst = st.selectbox("Select Publisher Institution ($I_{pub}$)", options=["-- Type Custom Institution --"] + unique_affiliations, help="Select the institution from the dataset, or choose to type a custom one.")
+                if selected_inst == "-- Type Custom Institution --":
+                    publisher_inst = st.text_input("Custom Publisher Institution", placeholder="e.g. University of Sao Paulo")
+                else:
+                    publisher_inst = selected_inst
+                    
+            with col2:
+                threshold_pct = st.slider("Regulatory Indexer Threshold (e.g., SciELO Limit) %", min_value=0, max_value=100, value=20, step=1, help="Maximum allowed percentage of endogenous articles for compliance.")
+
+            if not publisher_inst:
+                st.info("Please provide the **Publisher Institution ($I_{pub}$)** above to calculate the Endogeneity Index.")
+            else:
+                pub_lower = publisher_inst.lower().strip()
+                
+                import difflib
+                unique_lower = {a.lower(): a for a in unique_affiliations}
+                matches = set(difflib.get_close_matches(pub_lower, list(unique_lower.keys()), n=10, cutoff=0.5))
+                for a in unique_affiliations:
+                    if pub_lower in a.lower() or a.lower() in pub_lower:
+                        matches.add(a.lower())
+                
+                if pub_lower in matches:
+                    matches.remove(pub_lower)
+                    
+                suggested_cognates = sorted(list(set([unique_lower[m] for m in matches if m in unique_lower])))
+                
+                selected_cognates = st.multiselect(
+                    "Select Institutional Cognates (Aliases)", 
+                    options=[a for a in unique_affiliations if a.lower() != pub_lower],
+                    default=suggested_cognates,
+                    help="Select other names that represent the same institution to include them in the endogeneity calculation."
+                )
+
+                search_terms = [pub_lower] + [c.lower().strip() for c in selected_cognates]
+                df_endo_valid['is_endogenous'] = df_endo_valid['Affiliations'].astype(str).str.lower().apply(
+                    lambda x: any(term in x for term in search_terms)
+                )
+                
+                endogenous_count = df_endo_valid['is_endogenous'].sum()
+                e_inst = (endogenous_count / total_endo_analyzed) * 100
+
+                st.divider()
+                st.markdown("<h3 style='font-size: 19px; font-weight: 700; color: #1E293B;'>Audit Results</h3>", unsafe_allow_html=True)
+                
+                r_col1, r_col2, r_col3 = st.columns(3)
+                r_col1.metric("Analyzed Articles ($A$)", f"{total_endo_analyzed}")
+                r_col2.metric("Endogenous Articles ($\\sum\\delta$)", f"{endogenous_count}")
+                
+                delta_color = "normal" if e_inst <= threshold_pct else "inverse"
+                r_col3.metric("Endogeneity Index ($E_{inst}$)", f"{e_inst:.1f}%", delta=f"{threshold_pct - e_inst:.1f}% limit margin", delta_color=delta_color)
+
+                if e_inst > threshold_pct:
+                    st.error(f"**NON-COMPLIANCE ALERT:** The Endogeneity Index of **{e_inst:.1f}%** exceeds the stipulated regulatory threshold of **{threshold_pct}%**. Risk of de-indexing.")
+                else:
+                    st.success(f"**COMPLIANT:** The Endogeneity Index of **{e_inst:.1f}%** is within the stipulated regulatory threshold of **{threshold_pct}%**.")
+
+                st.progress(min(e_inst / 100.0, 1.0))
+                
+                if endogenous_count > 0:
+                    endogenous_df = df_endo_valid[df_endo_valid['is_endogenous']].drop(columns=['is_endogenous'])
+                    display_cols = [c for c in ['Title', 'Author', 'Publication Year', 'Affiliations', 'DOI'] if c in endogenous_df.columns]
+                    if not display_cols:
+                        display_cols = endogenous_df.columns
+                    endo_h1, endo_h2 = st.columns([0.7, 0.3], vertical_alignment="center")
+                    with endo_h1:
+                        st.markdown("<h4 style='font-size: 16px; font-weight: 700; color: #1E293B; margin-top: 20px;'>Identified Endogenous Articles</h4>", unsafe_allow_html=True)
+                    with endo_h2:
+                        _download_button(endogenous_df[display_cols], "Download CSV", "endogenous_articles.csv", key="dl_endogenous_articles")
+                    from utils.formatters import sanitize_df_for_streamlit
+                    st.dataframe(sanitize_df_for_streamlit(endogenous_df[display_cols]), width='stretch')
+
+    with tab_audit:
+        st.markdown("<h3 style='font-size: 19px; font-weight: 700; color: #1E293B;'>Geographic Metadata & Country Extraction Quality Audit</h3>", unsafe_allow_html=True)
+        st.markdown("""
+        Audit the completeness, consistency, and extraction provenance across verified author-bound geographical fields in your bibliographic corpus:
+        **Affiliations**, **Address**, and **Country**.
+        
+        *(Note: The conference `Location` field is explicitly excluded from author origin deduction to maintain scientific integrity and prevent mistaking conference venues for author provenance).*
+        """)
+        
+        # Build audit dataframe
+        audit_cols = [c for c in ['Title', 'Author', 'Publication Year', 'Country_Extracted', 'Country', 'Address', 'Location', 'Affiliations'] if c in df.columns]
+        
+        # Compute quality statistics per column
+        total_records = len(df)
+        has_aff = df['Affiliations'].apply(lambda x: pd.notna(x) and str(x).strip() != '' and str(x).lower() != 'nan').sum() if 'Affiliations' in df.columns else 0
+        has_addr = df['Address'].apply(lambda x: pd.notna(x) and str(x).strip() != '' and str(x).lower() != 'nan').sum() if 'Address' in df.columns else 0
+        has_orig_country = df['Country'].apply(lambda x: pd.notna(x) and str(x).strip() != '' and str(x).lower() != 'nan').sum() if 'Country' in df.columns else 0
+        has_extracted = df['Has_Country'].sum()
+        
+        m1, m2, m3, m4, m5 = st.columns(5)
+        m1.metric("Total Records", total_records)
+        m2.metric("Affiliations Present", f"{has_aff} ({(has_aff/total_records)*100:.1f}%)" if total_records else "0")
+        m3.metric("Author Address Present", f"{has_addr} ({(has_addr/total_records)*100:.1f}%)" if total_records else "0")
+        m4.metric("Explicit Country Present", f"{has_orig_country} ({(has_orig_country/total_records)*100:.1f}%)" if total_records else "0")
+        m5.metric("Author Country Identified", f"{has_extracted} ({(has_extracted/total_records)*100:.1f}%)" if total_records else "0", delta=f"{has_extracted - has_orig_country} deduced" if has_extracted >= has_orig_country else None)
+        
+        from utils.project_manager import get_active_project_name
+        st.caption(f"💾 **Project Audit Log:** All heuristic deductions and provenance details are saved to `Projects/{get_active_project_name()}/logs/geographic_inference_audit.log`")
+        
+        st.divider()
+        
+        # Filter options for the audit table
+        filter_col1, filter_col2, filter_col3 = st.columns([1.5, 2, 1], vertical_alignment="bottom")
+        with filter_col1:
+            audit_filter = st.radio(
+                "Filter Audit Records:",
+                ["All Records", "Successfully Extracted", "Missing Country Info"],
+                horizontal=True
+            )
+        with filter_col2:
+            search_query = st.text_input("Search in Geographic Fields or Title", placeholder="e.g. Brazil, USP, University, etc.")
+            
+        display_audit_df = df[audit_cols].copy()
+        display_audit_df['Identified_Countries'] = display_audit_df['Country_Extracted'].apply(lambda lst: ", ".join(lst) if lst else "None")
+        display_audit_df['Status'] = display_audit_df['Country_Extracted'].apply(lambda lst: "Identified" if lst else "Missing")
+        
+        # Reorder columns for optimal inspection
+        preferred_order = ['Status', 'Identified_Countries', 'Title', 'Affiliations', 'Address', 'Country', 'Location', 'Author', 'Publication Year']
+        final_cols = [c for c in preferred_order if c in display_audit_df.columns]
+        display_audit_df = display_audit_df[final_cols]
+        
+        if audit_filter == "Successfully Extracted":
+            display_audit_df = display_audit_df[display_audit_df['Status'] == "Identified"]
+        elif audit_filter == "Missing Country Info":
+            display_audit_df = display_audit_df[display_audit_df['Status'] == "Missing"]
+            
+        if search_query.strip():
+            sq = search_query.strip().lower()
+            mask = display_audit_df.astype(str).apply(lambda row: row.str.lower().str.contains(sq, regex=False)).any(axis=1)
+            display_audit_df = display_audit_df[mask]
+
+        with filter_col3:
+            _download_button(display_audit_df, "Download CSV", "geographic_metadata_audit_log.csv", key="dl_demog_audit")
+            
+        from utils.formatters import sanitize_df_for_streamlit
+        st.dataframe(
+            sanitize_df_for_streamlit(display_audit_df),
+            width='stretch',
+            height=420,
+            column_config={
+                "Status": st.column_config.TextColumn("Status", width="small"),
+                "Identified_Countries": st.column_config.TextColumn("Author Country (Extracted)", width="medium"),
+                "Title": st.column_config.TextColumn("Title", width="large"),
+                "Affiliations": st.column_config.TextColumn("Author Affiliations", width="large"),
+                "Address": st.column_config.TextColumn("Author Address", width="medium"),
+                "Country": st.column_config.TextColumn("Explicit Country Column", width="small"),
+                "Location": st.column_config.TextColumn("Conference Location (Excluded from Deduction)", width="medium")
+            }
+        )
+        
+        # Download audit log as CSV
+        from utils.project_manager import format_timestamped_filename, get_active_project_name
+        from utils.exports import _save_export_on_click
+        csv_data = display_audit_df.to_csv(index=False).encode('utf-8-sig')
+        fn_demo_log = format_timestamped_filename("geographic_metadata_audit_log.csv")
+
+        st.download_button(
+            label="Export Geographic Metadata Audit Log (CSV)",
+            icon=":material/download:",
+            data=csv_data,
+            file_name=fn_demo_log,
+            mime="text/csv",
+            on_click=_save_export_on_click,
+            args=("exports", "geographic_metadata_audit_log.csv", csv_data, "wb"),
+            help=f"Saves directly to Projects/{get_active_project_name()}/exports/ and downloads"
+        )

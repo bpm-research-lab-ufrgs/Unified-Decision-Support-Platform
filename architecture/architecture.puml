@@ -1,0 +1,167 @@
+@startuml bibliographic_analysis_architecture
+!pragma layout smetana
+skinparam defaultFontName "Helvetica", "Arial", sans-serif
+skinparam defaultFontSize 10
+skinparam roundCorner 6
+skinparam shadowing false
+skinparam linetype ortho
+skinparam nodesep 12
+skinparam ranksep 14
+skinparam packagePadding 10
+
+' Publication-grade styling
+skinparam package {
+    BackgroundColor #F8FAFC
+    BorderColor #64748B
+    FontColor #0F172A
+    FontStyle bold
+    FontSize 11
+    BorderThickness 1.2
+}
+
+skinparam rectangle {
+    BorderThickness 1.2
+}
+
+' High-contrast semantic palette
+skinparam rectangle<<ingest>> {
+    BackgroundColor #F0F7FF
+    BorderColor #2563EB
+    FontColor #1E3A8A
+}
+skinparam rectangle<<enrich>> {
+    BackgroundColor #FFFBEB
+    BorderColor #D97706
+    FontColor #78350F
+}
+skinparam rectangle<<state>> {
+    BackgroundColor #ECFDF5
+    BorderColor #059669
+    FontColor #064E3B
+}
+skinparam rectangle<<analytics>> {
+    BackgroundColor #FAF5FF
+    BorderColor #7C3AED
+    FontColor #4C1D95
+}
+skinparam rectangle<<export>> {
+    BackgroundColor #FEE2E2
+    BorderColor #E11D48
+    FontColor #9F1239
+}
+skinparam rectangle<<infra>> {
+    BackgroundColor #F1F5F9
+    BorderColor #475569
+    FontColor #0F172A
+}
+
+top to bottom direction
+
+' ==============================================================================
+' 1. INGESTION & DATA STANDARDIZATION
+' ==============================================================================
+package "1. Ingestion & Data Standardization (core/)" as PKG_INGEST {
+    rectangle "<b>Agnostic Ingestion</b>\n• Formats: CSV, Excel, BibTeX, RIS, NBIB\n• Automated encoding & delimiter detection\n• Custom state machine for NLM tag parsing" as IN_PARSE <<ingest>>
+    
+    rectangle "<b>Normalization & Deduplication</b>\n• 24-field canonical schema mapping\n• Cascade: DOI → OpenAlex → PMID → Title\n• Lossless merge via richness scoring" as IN_DEDUP <<ingest>>
+}
+
+' ==============================================================================
+' 2. DETERMINISTIC ENRICHMENT ENGINE
+' ==============================================================================
+package "2. Multi-Tier Enrichment Engine (core/enrichment.py)" as PKG_ENRICH {
+    rectangle "<b>Persistent Cache & Throttling</b>\n• 7-day SQLite HTTP cache (/tmp)\n• Rate-limiting: ~6.6 req/s OpenAlex; 0.35s NCBI delay" as ENRICH_CACHE <<enrich>>
+    
+    rectangle "<b>Multi-Tier Enrichment</b>\n• Tier 1: OpenAlex Batch (N=50) & PMID fallback\n• Tier 2: Crossref REST metadata harvest\n• Tier 3: PubMed eUtils (XML/Regex parsing)\n• Tier 4: Semantic Scholar Graph API\n• Tier 5: OpenAlex Fuzzy Title Match (≥ 82%)" as ENRICH_TIERS <<enrich>>
+}
+
+PKG_INGEST -.right.-> PKG_ENRICH
+IN_PARSE .down.> IN_DEDUP
+IN_DEDUP -[hidden]up-> ENRICH_CACHE
+ENRICH_CACHE .down.> ENRICH_TIERS
+
+' ==============================================================================
+' 3. WORKSPACE & REACTIVE STATE ROUTER
+' ==============================================================================
+package "3. Reactive State Management & Project Sandbox (utils/)" as PKG_STATE {
+    rectangle "<b>Session Router & Directory Isolation</b>\n• Two-Phase lifecycle: Ingestion & Validation → Analytical Workspace\n• State pointer duality: master_df (global) vs. working_df (focus slice)\n• Project workspaces: Projects/<Name>/ (/logs, /exports, /sessions)" as STATE_MGR <<state>>
+}
+
+ENRICH_TIERS -down-> STATE_MGR
+
+' ==============================================================================
+' 4. SPECIALIZED ANALYTICAL MODULES
+' ==============================================================================
+package "4. Specialized Methodological Engines (features/ & dashboard/)" as PKG_ANALYTICS {
+    
+    rectangle "<b>Impact & Gap Diagnostics</b>\n• Author indices (h, g-index)\n• Lorenz curve & Gini inequality\n• Corpus completeness auditing" as MOD_IMPACT <<analytics>>
+    
+    rectangle "<b>Thematic Stratification</b>\n• Macro-semantic: BERTopic\n• Micro-lexical: GSDMM\n• LLM conceptual synthesis" as MOD_TOPIC <<analytics>>
+    
+    rectangle "<b>Network Topology</b>\n• Co-citation & coupling graphs\n• Louvain community partition\n• 5 graph centralities" as MOD_NET <<analytics>>
+
+    rectangle "<b>Thematic Flow</b>\n• Longitudinal epoch quantile slicing\n• Era-bound NMF topic modeling\n• Inter-era tracking via Jaccard index" as MOD_FLOW <<analytics>>
+
+    rectangle "<b>Demographics & Diversity</b>\n• Scissors effect trajectory audit\n• First vs. last author drop-off\n• Author entity disambiguation" as MOD_DEMO <<analytics>>
+
+    rectangle "<b>Editorial Governance</b>\n• Institutional Endogeneity (E_inst)\n• Affiliation-publisher regex cross-check\n• SciELO compliance thresholds (> 20%)" as MOD_GOV <<analytics>>
+
+    rectangle "<b>PRISMA 2020 Systematic Review Engine</b>\n• Screening state machine (prisma_state) tracking PICOC inclusion/exclusion\n• Real-time Graphviz DOT compilation & programmatic SVG flowchart rendering" as MOD_PRISMA <<analytics>>
+
+    ' Symmetrical 3x2 Grid Alignment
+    MOD_IMPACT -[hidden]right-> MOD_GOV
+    MOD_GOV -[hidden]right-> MOD_NET
+    
+    MOD_IMPACT -[hidden]down-> MOD_FLOW
+    MOD_GOV -[hidden]down-> MOD_DEMO
+    MOD_NET -[hidden]down-> MOD_TOPIC
+
+    MOD_FLOW -[hidden]right-> MOD_DEMO
+    MOD_DEMO -[hidden]right-> MOD_TOPIC
+    
+    MOD_DEMO -[hidden]down-> MOD_PRISMA
+}
+
+' ==============================================================================
+' 5. SYNTHESIS, EXPORT & SERIALIZATION
+' ==============================================================================
+package "5. Universal Serialization & Presentation (core/export.py & utils/exports.py)" as PKG_EXPORT {
+    rectangle "<b>Universal Serializer & Dual-Write Output</b>\n• Multi-format serialization: RIS, BibTeX, NBIB, and multi-sheet Excel\n• Dual-write synchronization: Client browser download + server /exports/ archive\n• Embedded visual renderers: Plotly, PyVis HTML canvases, and Graphviz SVG" as OUT_ENGINE <<export>>
+}
+
+' ==============================================================================
+' 6. FOUNDATION LAYER (LIB & UTILS)
+' ==============================================================================
+package "Foundational Libraries & System Utilities (Cross-Cutting Infrastructure)" as PKG_INFRA {
+    
+    rectangle "<b>Mathematical & NLP Core (lib/topic_modeling/)</b>\n• Decoupled ensemble orchestrator (ensemble.py)\n• C++ log suppression & HuggingFace telemetry isolation\n• Domain Stopword Trap (filters research boilerplate)\n• Centroid consensus alignment & cluster degradation" as LIB_NLP <<infra>>
+    
+    rectangle "<b>Offline Client Runtimes (lib/)</b>\n• Standalone Vis.js distribution (vis-9.1.2/)\n  (CDN-free physics-simulated network canvas)\n• Tom-Select standalone JS UI dropdown engine" as LIB_JS <<infra>>
+
+    rectangle "<b>Quota Preservers (utils/cache/)</b>\n• Persistent JSON lookup tables:\n  - gender_cache.json (NamSor API quota saver)\n  - translation_cache.json (MD5 abstract hashes)\n  - openalex_authors_cache.json & ORCID registries\n  - semanticscholar_cache.json (S2 Graph API)" as UTIL_CACHE <<infra>>
+
+    rectangle "<b>I/O & Normalization Utilities (utils/)</b>\n• project_manager.py: _count_csv_rows_fast()\n  (Pure 1MB binary chunk reader bypassing Pandas)\n• formatters.py: Regex YYYY integer cast engine\n• Memory cache hash checks (os.path.getmtime)" as UTIL_IO <<infra>>
+
+    LIB_NLP -[hidden]right-> LIB_JS
+    LIB_JS -[hidden]right-> UTIL_CACHE
+    UTIL_CACHE -[hidden]right-> UTIL_IO
+}
+
+' ==============================================================================
+' PIPELINE CONNECTIONS
+' ==============================================================================
+STATE_MGR -down-> MOD_IMPACT
+STATE_MGR -down-> MOD_TOPIC
+STATE_MGR -down-> MOD_NET
+
+MOD_PRISMA -down-> OUT_ENGINE
+
+' Infrastructure Bindings
+LIB_NLP .up.> MOD_TOPIC
+LIB_JS .up.> MOD_NET
+UTIL_CACHE .up.> PKG_ENRICH
+UTIL_CACHE .up.> MOD_DEMO
+UTIL_IO .up.> STATE_MGR
+UTIL_IO .up.> OUT_ENGINE
+
+@enduml
