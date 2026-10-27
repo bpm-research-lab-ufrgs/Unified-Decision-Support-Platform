@@ -5,7 +5,7 @@
 ![Python](https://img.shields.io/badge/Python-3.10%2B-blue?logo=python&logoColor=white)
 ![Streamlit](https://img.shields.io/badge/Streamlit-1.30%2B-FF4B4B?logo=streamlit&logoColor=white)
 ![PRISMA 2020](https://img.shields.io/badge/PRISMA-2020%20Compliant-green)
-![License](https://img.shields.io/badge/License-MIT%2FAcademic-purple)
+![License](https://img.shields.io/badge/License-Academic%20Non--Commercial-blue)
 ![BPM Research Lab](https://img.shields.io/badge/Research-BPM%20Research%20Lab%20%7C%20UFRGS-003366)
 
 **A Unified Open-Source Platform for Scientometric Decision Support, Thematic Evolution, Editorial Governance, and Systematic Screening**
